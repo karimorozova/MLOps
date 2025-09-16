@@ -1,0 +1,25 @@
+# ===== Stage 1: builder =====
+FROM python:3.9-slim AS builder
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libglib2.0-0 libsm6 libxrender1 libxext6 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir --target=/deps -r requirements.txt
+
+# ===== Stage 2: runtime =====
+FROM python:3.9-slim
+
+WORKDIR /app
+
+# Copy dependencies only
+COPY --from=builder /deps /usr/local/lib/python3.9/site-packages/
+
+# Copy code + model
+COPY inference.py .
+COPY model.pt .
+
+ENTRYPOINT ["python", "inference.py"]
