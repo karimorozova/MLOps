@@ -1,5 +1,0 @@
-# Ignore Terraform state and providers
-*.tfstate
-*.tfstate.backup
-.terraform/
-.terraform.lock.hcl
