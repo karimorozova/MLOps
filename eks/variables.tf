@@ -1,18 +1,30 @@
 variable "cluster_name" {
-  description = "EKS cluster name"
-  type        = string
-  default     = "kari"
+  type    = string
+  default = "kari-hw-eks"
 }
 
 variable "cluster_version" {
-  description = "EKS cluster version"
-  type        = string
-  default     = "1.31"
+  type    = string
+  default = "1.31"
+}
+
+variable "vpc_id" {
+  type = string
+}
+variable "subnet_ids" {
+  type = list(string)
+}
+
+variable "node_groups" {
+  type = any
+ }
+
+variable "tags" {
+  type    = map(string)
+  default = {}
 }
 
 variable "aws_region" {
-  description = "Default AWS region"
-  type        = string
-  default     = "us-east-1"
+  type    = string
+  default = "us-east-1"
 }
-

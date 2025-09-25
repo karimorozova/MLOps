@@ -10,11 +10,11 @@ terraform {
 }
 
 provider "aws" {
-  region  = var.aws_region
+  region = var.aws_region
 
   default_tags {
     tags = {
-      Project   = "mlops-course"
+      Project   = "kari-hw-course"
       ManagedBy = "terraform"
     }
   }
