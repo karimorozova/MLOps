@@ -1,0 +1,187 @@
+stages:
+  - deploy
+  - train
+
+variables:
+  AWS_DEFAULT_REGION: "us-east-1"
+  TERRAFORM_VERSION: "1.6.0"
+  # OIDC settings
+  AWS_ROLE_ARN: "arn:aws:iam::317144351228:role/GitLab-CI-Role"
+  AWS_WEB_IDENTITY_TOKEN_FILE: "/tmp/web_identity_token"
+
+# Infrastructure deployment stage
+deploy_infrastructure:
+  stage: deploy
+  image: hashicorp/terraform:1.6.0
+  before_script:
+    - cd terraform
+    - terraform init
+  script:
+    - terraform plan
+    - terraform apply -auto-approve
+  only:
+    - main
+    - develop
+  when: manual
+  artifacts:
+    reports:
+      terraform: terraform/terraform-plan.json
+
+# The model training stage through Step Function
+train_model:
+  stage: train
+  image: amazon/aws-cli:2.15.0
+  id_tokens:
+    GITLAB_OIDC_TOKEN:
+      aud: https://gitlab.com
+  before_script:
+    - echo "Setting OIDC auth..."
+    - echo "$GITLAB_OIDC_TOKEN" > /tmp/web_identity_token
+    - export AWS_WEB_IDENTITY_TOKEN_FILE=/tmp/web_identity_token
+    - echo "OIDC token configured"
+    - echo "Launching the MLOps training pipeline..."
+    - echo "Launch options:"
+    - echo "   Commit: $CI_COMMIT_SHORT_SHA"
+    - echo "   Branch: $CI_COMMIT_REF_NAME"
+    - echo "   Pipeline: $CI_PIPELINE_ID"
+    - echo "   Job: $CI_JOB_ID"
+  script:
+    - |
+      # Getting ARN Step Function from Terraform outputs
+      STEP_FUNCTION_ARN=$(aws stepfunctions list-state-machines --query "stateMachines[?name=='mlops-training-pipeline'].stateMachineArn" --output text)
+
+      if [ -z "$STEP_FUNCTION_ARN" ]; then
+        echo "Error: Step Function 'mlops-training-pipeline' not found"
+        echo "Make sure the infrastructure is deployed via terraform apply"
+        exit 1
+      fi
+
+      echo "Found Step Function: $STEP_FUNCTION_ARN"
+
+      # Create a unique name for the execution
+      EXECUTION_NAME="train-$(date +%s)-${CI_COMMIT_SHORT_SHA}"
+
+      # JSON with options for Step Function
+      INPUT_JSON=$(cat <<EOF
+      {
+        "source": "gitlab-ci",
+        "commit": "$CI_COMMIT_SHORT_SHA",
+        "branch": "$CI_COMMIT_REF_NAME",
+        "pipeline_id": "$CI_PIPELINE_ID",
+        "job_id": "$CI_JOB_ID",
+        "triggered_by": "gitlab-ci",
+        "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      }
+      EOF
+      )
+
+      echo "Input parameters:"
+      echo "$INPUT_JSON" | jq .
+
+      # Launching Step Function
+      echo "Launch Step Function..."
+      EXECUTION_ARN=$(aws stepfunctions start-execution \
+        --state-machine-arn "$STEP_FUNCTION_ARN" \
+        --name "$EXECUTION_NAME" \
+        --input "$INPUT_JSON" \
+        --query 'executionArn' \
+        --output text)
+
+      echo "Step Function Launched:"
+      echo "   Execution ARN: $EXECUTION_ARN"
+      echo "   Execution Name: $EXECUTION_NAME"
+
+      # Waiting for the execution to complete (max 5min)
+      echo "Waiting for execution to complete..."
+      aws stepfunctions describe-execution \
+        --execution-arn "$EXECUTION_ARN" \
+        --query 'status' \
+        --output text
+
+      # Monitor the execution status
+      for i in {1..30}; do
+        STATUS=$(aws stepfunctions describe-execution \
+          --execution-arn "$EXECUTION_ARN" \
+          --query 'status' \
+          --output text)
+        
+        echo "Execution status ($i/30): $STATUS"
+        
+        if [ "$STATUS" = "SUCCEEDED" ]; then
+          echo "Pipeline successfully completed"
+          
+          # Geting execution result
+          RESULT=$(aws stepfunctions describe-execution \
+            --execution-arn "$EXECUTION_ARN" \
+            --query 'output' \
+            --output text)
+          
+          echo "Execution result:"
+          echo "$RESULT" | jq .
+          break
+          
+        elif [ "$STATUS" = "FAILED" ] || [ "$STATUS" = "TIMED_OUT" ] || [ "$STATUS" = "ABORTED" ]; then
+          echo "Pipeline completed with an error: $STATUS"
+          
+          # Getting error details
+          ERROR=$(aws stepfunctions describe-execution \
+            --execution-arn "$EXECUTION_ARN" \
+            --query 'error' \
+            --output text)
+          
+          echo "Error details"
+          echo "$ERROR" | jq .
+          exit 1
+          
+        else
+          echo "Pipeline still running... Waiting 10 seconds"
+          sleep 10
+        fi
+      done
+
+      # If not completed in 5 minutes
+      if [ "$STATUS" != "SUCCEEDED" ] && [ "$STATUS" != "FAILED" ] && [ "$STATUS" != "TIMED_OUT" ] && [ "$STATUS" != "ABORTED" ]; then
+        echo "Pipeline did not complete in 5 minutes. Current status: $STATUS"
+        echo "Check the status manually in AWS Console:"
+        echo "   https://console.aws.amazon.com/states/home?region=$AWS_DEFAULT_REGION#/statemachines"
+      fi
+
+      echo "Link in AWS Console:"
+      echo "   https://console.aws.amazon.com/states/home?region=$AWS_DEFAULT_REGION#/executions/details/$EXECUTION_ARN"
+  only:
+    - main
+    - develop
+    - merge_requests
+  when: on_success
+  artifacts:
+    reports:
+      junit: terraform/test-results.xml
+    expire_in: 1 week
+
+# Additional step to check status Step Function
+check_pipeline_status:
+  stage: train
+  image: amazon/aws-cli:2.15.0
+  id_tokens:
+    GITLAB_OIDC_TOKEN:
+      aud: https://gitlab.com
+  before_script:
+    - echo "Setting OIDC auth..."
+    - echo "$GITLAB_OIDC_TOKEN" > /tmp/web_identity_token
+    - export AWS_WEB_IDENTITY_TOKEN_FILE=/tmp/web_identity_token
+    - echo "OIDC tocken setted"
+  script:
+    - |
+      echo "Check the status of recent executions Step Function..."
+
+      # Getting a list of recent executions
+      aws stepfunctions list-executions \
+        --state-machine-arn $(aws stepfunctions list-state-machines --query "stateMachines[?name=='mlops-training-pipeline'].stateMachineArn" --output text) \
+        --max-items 5 \
+        --query 'executions[*].{Name:name,Status:status,StartDate:startDate}' \
+        --output table
+  only:
+    - main
+    - develop
+  when: manual
+  allow_failure: true
