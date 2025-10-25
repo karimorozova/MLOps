@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: application
+  labels:
+    app: minio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: minio
+  template:
+    metadata:
+      labels:
+        app: minio
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:latest
+          ports:
+            - containerPort: 9000
+            - containerPort: 9001
+          env:
+            - name: MINIO_ROOT_USER
+              value: "minio"
+            - name: MINIO_ROOT_PASSWORD
+              value: "minio123"
+            - name: MINIO_DEFAULT_BUCKETS
+              value: "mlflow-artifacts"
+          command:
+            - /bin/bash
+            - -c
+            - |
+              minio server /data --console-address ":9001" &
+              sleep 5
+              mc alias set myminio http://localhost:9000 minio minio123
+              mc mb myminio/mlflow-artifacts --ignore-existing
+              wait
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "200m"
+          volumeMounts:
+            - name: minio-storage
+              mountPath: /data
+      volumes:
+        - name: minio-storage
+          emptyDir: {}

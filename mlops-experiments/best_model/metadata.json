@@ -1,0 +1,8 @@
+{
+  "run_id": "f5ca6da3a7d34af59ff3cd7d5f76942f",
+  "learning_rate": 0.01,
+  "epochs": 50,
+  "accuracy": 1.0,
+  "loss": 0.10763873648177058,
+  "model_uri": "s3://mlflow-artifacts/1/f5ca6da3a7d34af59ff3cd7d5f76942f/artifacts/model"
+}
