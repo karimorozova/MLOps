@@ -1,0 +1,35 @@
+stages: [retrain]
+
+
+variables:
+  IMAGE_NAME: "$CI_REGISTRY_IMAGE/quality-service"
+  IMAGE_TAG: "$CI_COMMIT_SHORT_SHA"
+
+
+retrain-model:
+  stage: retrain
+  image: docker:24.0
+  services:
+    - docker:24.0-dind
+  before_script:
+    - apk add --no-cache git python3 py3-pip
+    - pip install -r requirements.txt
+  script:
+    - python model/train.py
+
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" "$CI_REGISTRY" --password-stdin
+    - docker build -t "$IMAGE_NAME:$IMAGE_TAG" -f Dockerfile .
+    - docker push "$IMAGE_NAME:$IMAGE_TAG"
+
+    - sed -i "s#tag: .*#tag: $IMAGE_TAG#g" helm/values.yaml
+
+    - git config user.email "ci@example.com"; git config user.name "gitlab-ci"
+    - git add helm/values.yaml
+    - git commit -m "ci: bump image tag to $IMAGE_TAG"
+    - git push origin "$CI_COMMIT_REF_NAME"
+
+  only:
+    - main
+    - master
+    - schedules
+    - web

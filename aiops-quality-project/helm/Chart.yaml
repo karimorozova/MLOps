@@ -1,0 +1,5 @@
+apiVersion: v2
+name: aiops-quality-service
+version: 0.1.0
+appVersion: "1.0.0"
+description: FastAPI inference service with drift detection and Prometheus metrics

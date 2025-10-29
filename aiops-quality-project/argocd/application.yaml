@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aiops-quality-service
+  namespace: infra-tools
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/karimorozova/MLOps.git
+    path: helm
+    targetRevision: final-project
+    helm:
+      values: |
+        image:
+          repository: docker.io/karimorozova/quality-service
+          tag: latest
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: application
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

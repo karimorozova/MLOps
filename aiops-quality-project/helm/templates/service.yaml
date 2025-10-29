@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: { { include "aiops.name" . } }
+  labels: { { - include "aiops.labels" . | nindent 4 } }
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "{{ .Values.service.targetPort }}"
+    prometheus.io/path: "/metrics"
+spec:
+  type: { { .Values.service.type } }
+  selector:
+    app: { { include "aiops.name" . } }
+  ports:
+    - name: http
+      port: { { .Values.service.port } }
+      targetPort: { { .Values.service.targetPort } }
